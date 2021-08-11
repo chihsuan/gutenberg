@@ -61,7 +61,7 @@ function gutenberg_apply_dimensions_support( $block_type, $block_attributes ) {
 		}
 	}
 
-	// Minimum height support.
+	// Minimum height.
 	$has_min_height_support = gutenberg_block_has_support( $block_type, array( '__experimentalDimensions', 'minHeight' ), false );
 
 	if ( $has_min_height_support ) {

@@ -211,7 +211,8 @@
 			]
 		},
 		"dimensions": {
-			"customHeight": false
+			"customHeight": false,
+			"customMinHeight": false
 		},
 		"spacing": {
 			"customMargin": false,
