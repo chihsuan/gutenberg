@@ -251,7 +251,6 @@ export default function ListView( {
 		//TODO: support add to container
 		//TODO: support add to child container
 		//TODO: simplify state and code
-		//TODO: either constrain the drag area to the max number of items, or test if we're hovering over the midpoint of next targets
 		const { clientId } = block;
 		const ITEM_HEIGHT = 36;
 
@@ -261,6 +260,19 @@ export default function ListView( {
 		}
 
 		const direction = v > 0 ? DOWN : UP;
+
+		const draggingUpPastBounds =
+			positions[ listPosition + 1 ] === undefined &&
+			direction === UP &&
+			translate > 0;
+		const draggingDownPastBounds =
+			listPosition === 0 && direction === DOWN && translate < 0;
+
+		if ( draggingUpPastBounds || draggingDownPastBounds ) {
+			// If we've dragged past all items with the first or last item, don't start checking for potential swaps
+			// until we're near other items
+			return;
+		}
 
 		if ( Math.abs( translate ) > ITEM_HEIGHT / 2 ) {
 			const position = positions[ listPosition ];
