@@ -152,6 +152,7 @@ export default function ListViewBranch( props ) {
 							moveItem={ moveItem }
 							dropItem={ dropItem }
 							listPosition={ nextPosition }
+							parentId={ parentBlockClientId }
 						/>
 						{ hasNestedBranch && isExpanded && (
 							<ListViewBranch

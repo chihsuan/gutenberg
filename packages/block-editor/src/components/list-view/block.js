@@ -12,6 +12,7 @@ import {
 	__experimentalTreeGridRow as TreeGridRow,
 	MenuGroup,
 	MenuItem,
+	__unstableUseMotionValue as useMotionValue,
 } from '@wordpress/components';
 import { __ } from '@wordpress/i18n';
 import { moreVertical } from '@wordpress/icons';
@@ -48,6 +49,7 @@ export default function ListViewBlock( {
 	moveItem,
 	dropItem,
 	listPosition,
+	parentId,
 } ) {
 	const cellRef = useRef( null );
 	const [ isHovered, setIsHovered ] = useState( false );
@@ -91,6 +93,7 @@ export default function ListViewBlock( {
 				clientId,
 				dropContainer: block?.dropContainer ?? false,
 				dropSibling: block?.dropSibling ?? false,
+				parentId,
 			},
 		} );
 	}, [ listPosition, draggingId ] );
@@ -167,9 +170,29 @@ export default function ListViewBlock( {
 		dropItem();
 	};
 
+	const velocity = useMotionValue( 0 );
+	const onDrag = ( event, info ) => {
+		// When swapping items with a neighbor a positive translate value is moving down, and a
+		// negative value is moving up in the onViewportBoxUpdate callback.
+		//
+		// However, when skipping over items, we need mouse velocity to understand if the user is dragging up or down.
+		// This is because with the view box in the same position, the originPoint is modified and the translate value
+		// may flip it's sign.
+		//
+		// Velocity is not available in onViewportBoxUpdate, so we set this motion value here:
+		velocity.set( info.velocity.y );
+	};
+
 	const blockDrag = ( box, delta ) => {
 		if ( draggingId === clientId ) {
-			moveItem( block, listPosition, delta.y );
+			moveItem( {
+				block,
+				translate: delta.y.translate,
+				isLastChild: position === rowCount,
+				isFirstChild: position === 1,
+				velocity,
+				listPosition,
+			} );
 		}
 	};
 
@@ -191,8 +214,10 @@ export default function ListViewBlock( {
 			drag="y"
 			whileDrag={ { scale: 1.1 } }
 			onDragStart={ onDragStart }
+			onDrag={ onDrag }
 			onDragEnd={ onDragEnd }
 			onViewportBoxUpdate={ blockDrag }
+			layoutId={ clientId }
 		>
 			<TreeGridCell
 				className="block-editor-list-view-block__contents-cell"

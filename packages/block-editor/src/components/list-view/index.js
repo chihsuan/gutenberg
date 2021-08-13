@@ -40,78 +40,83 @@ const expanded = ( state, action ) => {
 	}
 };
 
-function findCurrentPosition( tree, id, parentId = '' ) {
-	for ( let index = 0; index < tree.length; index++ ) {
-		const block = tree[ index ];
-		if ( block.clientId === id ) {
-			return { parentId, index, block, tree };
-		}
-		if ( block.innerBlocks && block.innerBlocks.length > 0 ) {
-			const match = findCurrentPosition(
-				block.innerBlocks,
-				id,
-				block.clientId
-			);
-			if ( match ) {
-				return match;
-			}
-		}
-	}
-	return false;
-}
-
-function removeItemFromTree( tree, id ) {
+function removeItemFromTree( tree, id, parentId = '' ) {
 	const newTree = [];
+	let removeParentId = '';
 	for ( let index = 0; index < tree.length; index++ ) {
 		const block = tree[ index ];
 		if ( block.clientId !== id ) {
 			if ( block.innerBlocks.length > 0 ) {
+				const {
+					newTree: innerBlocks,
+					removeParentId: cRemoveParentId,
+				} = removeItemFromTree( block.innerBlocks, id, block.clientId );
 				newTree.push( {
 					...block,
-					innerBlocks: removeItemFromTree( block.innerBlocks, id ),
+					innerBlocks,
 				} );
+				removeParentId =
+					cRemoveParentId !== '' ? cRemoveParentId : removeParentId;
 			} else {
 				newTree.push( { ...block } );
 			}
+		} else {
+			removeParentId = parentId;
 		}
 	}
-	return newTree;
+	return { newTree, removeParentId };
 }
 
-function addItemToTree( tree, id, item, insertAfter = true ) {
+function addItemToTree( tree, id, item, insertAfter = true, parentId = '' ) {
 	const newTree = [];
+	let targetIndex = -1;
+	let targetId = '';
 	for ( let index = 0; index < tree.length; index++ ) {
 		const block = tree[ index ];
 		if ( block.clientId === id ) {
+			targetId = parentId;
 			if ( insertAfter ) {
+				targetIndex = newTree.length + 1;
 				newTree.push( { ...block } );
 				newTree.push( { ...item } );
 			} else {
+				targetIndex = newTree.length;
 				newTree.push( { ...item } );
 				newTree.push( { ...block } );
 			}
 		} else if ( block.clientId !== id ) {
 			if ( block.innerBlocks.length > 0 ) {
+				const {
+					newTree: innerBlocks,
+					targetIndex: childTargetIndex,
+					targetId: childTargetId,
+				} = addItemToTree(
+					block.innerBlocks,
+					id,
+					item,
+					insertAfter,
+					block.clientId
+				);
 				newTree.push( {
 					...block,
-					innerBlocks: addItemToTree(
-						block.innerBlocks,
-						id,
-						item,
-						insertAfter
-					),
+					innerBlocks,
 				} );
+				targetIndex = Math.max( targetIndex, childTargetIndex );
+				targetId = childTargetId !== '' ? childTargetId : targetId;
 			} else {
 				newTree.push( { ...block } );
 			}
 		}
 	}
-	return newTree;
+	return { newTree, targetId, targetIndex };
 }
+
+const UP = 'up';
+const DOWN = 'down';
 
 // eslint-disable-next-line no-unused-vars
 function findFirstValidPosition( positions, current, translate, moveDown ) {
-	//TODO: this works, but after skipping an item translate can no longer be used to indicate drag direction.
+	//TODO: add this back when implementing skipping over invalid items
 	const ITEM_HEIGHT = 36;
 	const iterate = moveDown ? 1 : -1;
 	let index = current + iterate;
@@ -211,65 +216,110 @@ export default function ListView( {
 		lastTarget.current = null;
 	}, [] );
 
-	const dropItem = () => {
+	const dropItem = async () => {
 		if ( ! lastTarget.current ) {
 			return;
 		}
-		const { targetPosition, clientId, movingDown } = lastTarget.current;
-		const targetId = targetPosition.clientId;
-		const target = findCurrentPosition(
-			removeItemFromTree( clientIdsTree, clientId ),
-			targetId
-		);
-		const current = findCurrentPosition( clientIdsTree, clientId );
-
-		const targetIndex = movingDown ? target.index + 1 : target.index;
 		setDropped( true );
-		moveBlocksToPosition(
+		const {
+			clientId,
+			originalParent,
+			targetId,
+			targetIndex,
+		} = lastTarget.current;
+		lastTarget.current = null;
+		await moveBlocksToPosition(
 			[ clientId ],
-			current.parentId,
-			target.parentId,
+			originalParent,
+			targetId,
 			targetIndex
 		);
-		lastTarget.current = null;
-		// TODO:
-		// - use cached representation while list view has focus (maybe after the first drag)
-		// - cache removal of the dragged item in tree
-		// - try storing parent positions on setPositions
-		// - see what performance of a flat representation looks like
+		//TODO: still need to find something more reliable to test if things have settled
 		timeoutRef.current = setTimeout( () => {
 			setDropped( false );
 		}, 200 );
 	};
 
-	const moveItem = ( block, listPosition, { translate } ) => {
+	const moveItem = ( {
+		block,
+		translate,
+		listPosition,
+		isLastChild,
+		isFirstChild,
+		velocity,
+	} ) => {
 		//TODO: support add to container
 		//TODO: support add to child container
 		//TODO: simplify state and code
+		//TODO: either constrain the drag area to the max number of items, or test if we're hovering over the midpoint of next targets
 		const { clientId } = block;
 		const ITEM_HEIGHT = 36;
 
+		const v = velocity?.get() ?? 0;
+		if ( v === 0 ) {
+			return;
+		}
+
+		const direction = v > 0 ? DOWN : UP;
+
 		if ( Math.abs( translate ) > ITEM_HEIGHT / 2 ) {
-			const movingDown = translate > 0;
-			const targetPosition = movingDown
-				? positions[ listPosition + 1 ]
-				: positions[ listPosition - 1 ];
+			const position = positions[ listPosition ];
+
+			// First, check to see if we should break out of a container block:
+			if (
+				position.parentId &&
+				( ( direction === UP && isFirstChild ) ||
+					( direction === DOWN && isLastChild ) )
+			) {
+				const {
+					newTree: treeWithoutDragItem,
+					removeParentId,
+				} = removeItemFromTree( clientIdsTree, clientId );
+				const { newTree, targetId, targetIndex } = addItemToTree(
+					treeWithoutDragItem,
+					position.parentId,
+					block,
+					direction === DOWN
+				);
+				lastTarget.current = {
+					clientId,
+					originalParent: removeParentId,
+					targetId,
+					targetIndex,
+				};
+				setTree( newTree );
+				return;
+			}
+
+			// Swap siblings
+			const targetPosition =
+				direction === DOWN
+					? positions[ listPosition + 1 ]
+					: positions[ listPosition - 1 ];
 
 			if ( targetPosition === undefined ) {
 				return;
 			}
-			lastTarget.current = {
-				clientId,
-				targetPosition,
-				movingDown,
-			};
-			const newTree = addItemToTree(
-				removeItemFromTree( clientIdsTree, clientId ),
-				targetPosition.clientId,
-				block,
-				movingDown
-			);
-			setTree( newTree );
+			if ( position.parentId === targetPosition.parentId ) {
+				//Sibling swap
+				const {
+					newTree: treeWithoutDragItem,
+					removeParentId,
+				} = removeItemFromTree( clientIdsTree, clientId );
+				const { newTree, targetIndex, targetId } = addItemToTree(
+					treeWithoutDragItem,
+					targetPosition.clientId,
+					block,
+					direction === DOWN
+				);
+				lastTarget.current = {
+					clientId,
+					originalParent: removeParentId,
+					targetId,
+					targetIndex,
+				};
+				setTree( newTree );
+			}
 		}
 	};
 
