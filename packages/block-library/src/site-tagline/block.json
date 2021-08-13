@@ -26,7 +26,11 @@
 			"__experimentalFontFamily": true,
 			"__experimentalFontWeight": true,
 			"__experimentalTextTransform": true,
-			"__experimentalLetterSpacing": true
+			"__experimentalLetterSpacing": true,
+			"__experimentalDefaultControls": {
+				"fontSize": true,
+				"lineHeight": true
+			}
 		}
 	},
 	"editorStyle": "wp-block-site-tagline-editor"
